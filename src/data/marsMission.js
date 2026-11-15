@@ -3,7 +3,7 @@ export const marsMission = {
   name: 'Mars Base',
   destination: 'Ares Planitia Outpost',
   difficulty: 'Hard',
-  durationDays: 24,
+  durationDays: 30,
   astronauts: 3,
   description:
     'Command a Martian habitat in a thin CO2 atmosphere. Survive cold conditions, dust storms, radiation, and variable solar power while balancing limited supplies.',
@@ -15,9 +15,9 @@ export const marsMission = {
   ],
   initial: {
     resources: {
-      oxygen: { current: 100, max: 120 },
-      water: { current: 200, max: 240 },
-      food: { current: 100, max: 120 },
+      oxygen: { current: 120, max: 150 },
+      water: { current: 240, max: 280 },
+      food: { current: 120, max: 140 },
       electricity: { current: 500, max: 600 },
       battery: { current: 100, max: 100 },
     },
@@ -34,5 +34,12 @@ export const marsMission = {
     baseRadiation: 16,
     solarBase: 0.72,
     dustRisk: 0.18,
+    solarGenerationMult: 0.85,
+    commDelayMinMin: 4,   // one-way light time Earth↔Mars, minutes (archived-real range)
+    commDelayMaxMin: 24,
+    archivedStorms: [
+      { day: 6, label: 'May 2024 Gannon G5 geomagnetic storm (archived DONKI/CCMC)' },
+      { day: 18, label: 'Jul. 2012 near-Carrington CME — observed by STEREO-A (archived)' },
+    ],
   },
 }

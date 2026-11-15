@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Moon, Orbit, Thermometer, Radiation, Sun, Wind } from 'lucide-react'
+import { Moon, Orbit } from 'lucide-react'
 import { useMission } from '../hooks/useMission'
 import { MISSIONS } from '../simulation/missionEngine'
 
@@ -49,7 +49,7 @@ export default function MissionSelection() {
         <MissionCard mission={MISSIONS.mars} onSelect={() => choose('mars')} />
       </div>
       <div className="mt-8 glass rounded-xl p-4 text-sm text-slate-300">
-        <strong className="text-cyan-200">Note:</strong> Initial resources are illustrative simulation values (e.g. Oxygen 100, Water 200 L, Food 100, Electricity 500, Battery 100%) for three astronauts, not actual NASA mission specifications.
+        <strong className="text-cyan-200">Note:</strong> Initial resources are illustrative simulation values (e.g. Oxygen 120, Water 240 L, Food 120, Electricity 500, Battery 100%) for three astronauts, not actual NASA mission specifications.
       </div>
     </div>
   )

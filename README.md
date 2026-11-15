@@ -1,8 +1,10 @@
-# Junior Astronaut Mission Trainer
+# ASTRA — Junior Astronaut Mission Trainer
 
-A web app built for the NASA Space Apps Challenge 2026 challenge **"Build a Junior Astronaut Mission Trainer"**.
+An interactive, educational space-survival simulation built for the NASA Space Apps Challenge 2026 **“Build a Junior Astronaut Mission Trainer.”**
 
-Run a **Moon South Pole outpost** for 30 days and balance competing demands—**power, oxygen, water, food, and radiation shielding**—to keep your crew alive through mission events inspired by archived NASA data/context.
+You command a 3-astronaut research outpost on the **Moon** (Lunar South Pole, *First Light*) or **Mars** (Ares Planitia, *Beyond Earth*) for **30 mission Sols** (10–12 in Kid Mode). The only question that matters:
+
+> **Can I keep my astronauts alive for another Sol?**
 
 ## How to run
 
@@ -11,9 +13,9 @@ npm install
 npm run dev
 ```
 
-Then open the local URL shown in the terminal (usually `http://localhost:5173`).
+Open the local URL shown (usually `http://localhost:5173`).
 
-To create a production build:
+Production build:
 
 ```bash
 npm run build
@@ -22,52 +24,50 @@ npm run preview
 
 ## How to play
 
-### Objective
-Survive **30 mission days** at the lunar outpost. The mission succeeds if you reach the end with your crew still alive and critical supplies above zero.
+### Goal
+Survive **30 Sols** (Moon/Mars) — or **10–12 Sols** in Kid Mode — with oxygen, water, food, power and crew health still viable. Score weights **crew survival and health above all**, with science and emergency performance as bonuses.
 
-### Mission setup
-1. On the **Mission Briefing** screen, choose a **crew size (2–6)**.
-   - Larger crews consume oxygen, water, and food faster and increase power demand.
-2. Click **Start Mission**.
+### Launch
+1. On the ASTRA home page, choose your **destination** (LUNAR or MARS).
+2. Choose a **difficulty**:
+   - **Explorer** — forgiving supplies & timers, meant for learning
+   - **Survival** — balanced, the intended experience (supplies cover roughly a full 30-Sol mission with careful recycling; Mars needs load shedding)
+   - **Mission Commander** — limited supplies, harsher emergencies (hard)
+   - **Kid Mode** — 10–12 Sols, three big gauges (Air / Food &amp; Water / Power) and plain-language labels
+3. Enter your **astronaut callsign** and click **ENTER MISSION**.
 
-### Resources
-Keep these above **0** (or you lose):
+### The core loop (each Sol)
+1. Inspect **Mission Control**: day/phase, crew health, resources, environment.
+2. Adjust equipment (ON/OFF) and repair systems with **spare parts**.
+3. Send the **rover** on surveys (science, lunar water-ice, Mars CO₂→O₂ ISRU study).
+4. Manage atmosphere: **oxygen concentration**, **CO₂ ppm**, **cabin pressure**, **humidity**, **waste**.
+5. Advance the day — the engine calculates everything in order: environment → power → life support → atmosphere → crew → events → failure/success.
+6. Resolve emergencies — each option states **what it protects / saves / costs**; answer order is shuffled, and “do nothing” choices were replaced by real trade-offs (e.g. “save power but lose air”).
 
-- **Power** – generated daily from solar (simplified Moon South Pole assumption) and spent by habitat/systems/actions.
-- **Oxygen** – life support breathable supply (daily consumption per crew, with recycling assist).
-- **Water** – drinking and systems (daily consumption per crew, with recycling assist).
-- **Food** – crew nutrition (daily consumption per crew, with greenhouse supplement).
-- **Shielding** – protection against radiation; low shielding harms crew health over time.
-- **Crew Health** – overall condition; reaches 0 if hazards/supply failures are not managed.
+### What the sim models
+- **Power:** solar generation depends on sunlight, panel condition, dust and mission (Mars runs **below** demand — choose what to switch off). Battery stores surplus and takes the strain. Critical life support keeps priority, important systems are throttled under low reserve, and **optional science/comms/lighting loads (10 power/day)** can be shed — research pauses while they are off.
+- **Life support:** oxygen generation and **CO₂ removal are separate systems** — a scrubber is required even if O₂ is fine.
+- **Atmosphere:** O₂ concentration, CO₂ ppm, cabin pressure, humidity, cabin temperature vs outside.
+- **Crew:** individual health, fatigue, stress, hydration, nutrition, cumulative **radiation dose** — shielding reduces it, but dose accumulates over the mission and damages health at high levels (warning ~120, danger ~260, critical ~400).
+- **Food:** the hydroponic greenhouse needs power, water and **three Sols of growing time** before the first harvest; it does not produce food instantly.
+- **Lunar night:** Sols ~7–12 on the Moon see ~no sunlight; everything runs on battery.
+- **Mars light-time:** 4–24 minutes one-way. **ASK EARTH** contacts Earth — but the advisory arrives a Sol or two later, never in time for live rescue.
+- **Archived storms:** DONKI/CCMC space-weather events (Oct 2003 X17, Sep 2017 X9.3, May 2024 Gannon G5, Jul 2012 near-Carrington CME) replay on scripted Sols, labeled archived.
 
-### Each day (turn)
-1. **(Optional) Take one outpost action** to respond to your current margins:
-   - **Boost Power:** `+10 Power`, `-1 Food`
-   - **Tend Greenhouse:** `+8 Food`, `-3 Water`, `-3 Power`
-   - **Maintain Shielding:** `+8 Shielding`, `-4 Power`
-   - **Optimize Recycling:** `+6 Oxygen`, `+6 Water`, `-5 Power`
-   > You can click actions to adjust before advancing; watch the bars because actions have costs.
-2. **Click "Advance Day"** to simulate the day:
-   - Daily solar gain and baseline/crew power use are applied.
-   - Crew consumes oxygen, water, and food (with partial recycling/greenhouse offsets).
-   - Low power reduces life-support effectiveness; low shielding damages health.
-3. **Resolve events when they appear:** on certain days you’ll get a scenario event with 2 choices. Each choice shows its trade-offs and the **archived NASA data/context** that informed it. Pick the option that best fits your situation.
+### Failure & success
+- **Success:** all crew alive at the end of the Sols.
+- **Failure:** all crew lost, oxygen/water/food exhausted, or total power loss (electricity 0 and battery 0).
 
-### Winning and losing
-- **Win:** Survive all 30 days. A score is calculated from your final resource/health levels.
-- **Lose:** Mission ends immediately if **Crew Health, Oxygen, Water, or Food** reaches 0. You can click **Play Again** to retry.
+## What’s real vs simplified
+In-game **About the Data** tab (Mission Control → About the Data) lists it plainly — archived NASA DONKI/BVAD science, dose accumulation and shielding, the Moon’s south-pole insolation/ice physics, Mars’s thin CO₂ air and light-time, vs game-unit scaling, compressed time and scripted events.
 
-### Tips
-- Don’t let **Power** fall too low—power shortages hit oxygen/water and health.
-- Invest in **Shielding** before/after radiation-related events.
-- Treat events as trade-offs: preserving one resource often costs another.
+## Data persistence
+Mission state is saved in the browser (`LocalStorage`, key `astra-mission-state-v2`). Refresh keeps progress; **Restart Mission** resets the run. Older saves are normalized on load (mission length, greenhouse growth, storm history, crew tasks, optional loads), so a legacy run can still finish.
 
-## NASA data & references (archived, educational use)
-The simulation uses **simplified, archived/public reference context** (not live feeds) to drive gameplay and learning:
+## NASA references (archived, educational use)
+- **NASA BVAD (NTRS 20210024855)** — baseline crew consumables & life-support
+- **NASA DONKI (CCMC)** — space-weather catalog used for the archived storm Sols
+- **MSL RAD** — Mars surface radiation context
+- **NASA Moon Trek** — South Pole illumination / permanently shadowed regions context
 
-- **NASA BVAD (NTRS 20210024855):** baseline crew consumables/life-support assumptions inform per-crew consumption and supply trade-offs. https://ntrs.nasa.gov/citations/20210024855
-- **NASA DONKI (CCMC):** space weather events (e.g. solar energetic particles) inform radiation-hazard scenarios (curated/archived examples). https://kauai.ccmc.gsfc.nasa.gov/DONKI/
-- **MSL RAD / PDS (archived context):** Mars surface radiation measurements provide context for radiation risk framing. https://pds-ppi.igpp.ucla.edu/search/view/?f=yes&id=pds://PPI/MSL-M-RAD-3-RDR-V1.0
-- **NASA Moon Trek (archived layer context):** south-pole illumination/Earth-visibility context informs power/operations assumptions for the lunar scenario. https://trek.nasa.gov/moon/
-
-> This is an educational game for the challenge, not a real mission planning or safety tool.
+> This is an educational simulation for the Space Apps Challenge — not a real mission-planning or safety tool.

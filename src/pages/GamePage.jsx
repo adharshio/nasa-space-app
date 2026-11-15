@@ -1,26 +1,23 @@
 import { useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Dashboard from './Dashboard.jsx'
-import ResourceManagement from './ResourceManagement.jsx'
-import EmergencyManagement from './EmergencyManagement.jsx'
 import MissionResults from './MissionResults.jsx'
 import LearnScience from './LearnScience.jsx'
+import AboutData from './AboutData.jsx'
 import { useMission } from '../hooks/useMission.js'
 
 const tabs = [
   { id: 'dashboard', label: 'Mission Control', path: '/dashboard' },
-  { id: 'manage', label: 'Systems & Resources', path: '/manage' },
-  { id: 'emergencies', label: 'Emergency Center', path: '/emergencies' },
   { id: 'results', label: 'Mission Report', path: '/results' },
   { id: 'learn', label: 'Learn Science', path: '/learn' },
+  { id: 'about', label: 'About the Data', path: '/about' },
 ]
 
 const pathToTab = {
   '/dashboard': 'dashboard',
-  '/manage': 'manage',
-  '/emergencies': 'emergencies',
   '/results': 'results',
   '/learn': 'learn',
+  '/about': 'about',
 }
 
 export default function GamePage({ astronautName, destination, onExit }) {
@@ -53,10 +50,9 @@ export default function GamePage({ astronautName, destination, onExit }) {
 
   const view = {
     dashboard: <Dashboard />,
-    manage: <ResourceManagement />,
-    emergencies: <EmergencyManagement />,
     results: <MissionResults />,
     learn: <LearnScience />,
+    about: <AboutData />,
   }[tab]
 
   const select = (id) => {

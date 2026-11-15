@@ -129,24 +129,3 @@ body {
   50% { transform: scale(1.04); opacity: 1; }
 }
 .breathe { animation: breathe 4s ease-in-out infinite; }
-
-/* Print Styles for Certificate */
-@media print {
-  body {
-    background: #ffffff !important;
-    color: #000000 !important;
-  }
-  .no-print {
-    display: none !important;
-  }
-  #certificate-frame {
-    border: 3px solid #b45309 !important;
-    background: #0f172a !important;
-    color: #ffffff !important;
-    box-shadow: none !important;
-    margin: 0 !important;
-    page-break-inside: avoid;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-}
