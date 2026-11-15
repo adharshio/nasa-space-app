@@ -117,8 +117,8 @@ export default function HomePage({ onStartMission }) {
             <h3 className="astra-subheading">HOW ASTRA WORKS</h3>
             <ol className="astra-steps">
               <li><span>1</span><div><strong>Launch</strong><p>Select Lunar or Mars, enter your astronaut name, and enter the outpost in command.</p></div></li>
-              <li><span>2</span><div><strong>Manage each Sol</strong><p>Toggle systems like recyclers, greenhouse, heating, solar, and radiation shelter. Watch the resource cards and chart.</p></div></li>
-              <li><span>3</span><div><strong>Respond to emergencies</strong><p>Leaks, dust storms, radiation storms, equipment failures, and heat waves each demand trade-offs. Choose what to protect.</p></div></li>
+              <li><span>2</span><div><strong>Command in real time</strong><p>Mission time runs on its own. Toggle recyclers, greenhouse, heating, solar and shelter while the Sol clock advances — pause or speed up when you need to think.</p></div></li>
+              <li><span>3</span><div><strong>Answer the crew</strong><p>Astronauts pop up with issues every few seconds. Click the warning marker on the base, read the report and choose what to protect. Big emergencies pause time; small crew reports keep it running.</p></div></li>
             </ol>
           </div>
         </div>

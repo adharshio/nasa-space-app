@@ -89,7 +89,7 @@ export function evaluateMission(state, { forcedFailure = null } = {}) {
     remaining,
     emergenciesEncountered,
     emergenciesHandled,
-    scientificPoints: science,
+    scientificPoints: Math.round(science),
     roverTrips: state.stats?.roverTrips ?? 0,
     evas: state.stats?.evas ?? 0,
     iceExtractedKg: state.stats?.iceExtractedKg ?? 0,

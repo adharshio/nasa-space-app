@@ -74,7 +74,7 @@ export default function GamePage({ astronautName, destination, onExit }) {
               {astronautName} · {destination === 'Moon' ? 'Lunar Outpost: First Light' : 'Red Frontier: Beyond Earth'}
             </h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => select('dashboard')} className="px-3 py-2 rounded-lg bg-sky-500 text-slate-950 text-sm font-semibold">MISSION CONTROL</button>
             <button
               onClick={() => {

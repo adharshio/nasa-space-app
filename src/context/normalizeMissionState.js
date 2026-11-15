@@ -1,4 +1,4 @@
-import { MISSIONS, CREW_TASKS } from '../simulation/missionEngine'
+import { MISSIONS, CREW_TASKS, issueMetaFor } from '../simulation/missionEngine'
 import { DIFFICULTIES, MISSION_DURATION_DAYS, EQUIPMENT_CONDITION } from '../simulation/config'
 import { defaultEquipmentState, DEFAULT_SPARE_PARTS } from '../data/equipment'
 
@@ -50,6 +50,18 @@ export function normalizeLoadedState(raw) {
   s.day = Number.isFinite(s.day) && s.day >= 1 ? Math.floor(s.day) : 1
   s.phase = PHASES.has(s.phase) ? s.phase : 'active'
   s.pendingEmergency = s.pendingEmergency && typeof s.pendingEmergency === 'object' ? s.pendingEmergency : null
+  if (s.pendingEmergency) {
+    const meta = issueMetaFor(s.pendingEmergency.type)
+    const reporterId = s.pendingEmergency.astronautId ?? s.pendingEmergency.reporterId ?? meta.reporterId
+    s.pendingEmergency = { ...meta, ...s.pendingEmergency, reporterId, astronautId: reporterId }
+  }
+  s.crewReport = s.crewReport && typeof s.crewReport === 'object' ? s.crewReport : null
+  if (s.crewReport) {
+    const meta = issueMetaFor(s.crewReport.type)
+    const reporterId = s.crewReport.astronautId ?? s.crewReport.reporterId ?? meta.reporterId
+    s.crewReport = { ...meta, ...s.crewReport, reporterId, astronautId: reporterId }
+  }
+  s.reportSeq = Number.isFinite(s.reportSeq) ? Math.max(0, Math.floor(s.reportSeq)) : 0
   if (s.phase === 'emergency' && !s.pendingEmergency) s.phase = 'active'
   if (s.pendingEmergency && s.phase === 'active') s.phase = 'emergency'
   if (s.phase === 'completed' && !s.result) s.phase = 'active'
@@ -99,6 +111,7 @@ export function normalizeLoadedState(raw) {
   s.stats = {
     emergenciesEncountered: 0,
     emergenciesHandled: 0,
+    reportsHandled: 0,
     scientificPoints: 0,
     roverTrips: 0,
     evas: 0,
@@ -119,6 +132,22 @@ export function normalizeLoadedState(raw) {
   s.log = Array.isArray(s.log) ? s.log : []
   s.lastCycleSummary = s.lastCycleSummary ?? null
   s.rates = s.rates ?? null
+  // Real-time clock: fraction of the current Sol already simulated.
+  s.missionClock = Number.isFinite(s.missionClock) ? Math.max(0, Math.min(0.999, s.missionClock)) : 0
+  s.solStart = s.solStart && typeof s.solStart === 'object'
+    ? s.solStart
+    : {
+        oxygen: s.resources.oxygen.current,
+        water: s.resources.water.current,
+        food: s.resources.food.current,
+        electricity: s.resources.electricity.current,
+        battery: s.resources.battery.current,
+        co2Ppm: s.atmosphere.co2Ppm,
+        pressure: s.atmosphere.pressure,
+        temperature: s.environment.temperature,
+        radiation: s.environment.radiation,
+        waste: s.resources.waste?.current ?? 0,
+      }
   s.history = Array.isArray(s.history) && s.history.length
     ? s.history
     : [{

@@ -23,6 +23,7 @@ export default function EmergencyModal({ emergency, onChoose, spareParts = 0 }) 
         <div className="grid gap-3">
           {emergency.choices.map((c) => {
             const needsPart = (c.effects?.spareParts ?? 0) < 0
+            const partMentioned = /spare part/i.test(c.label)
             const disabled = needsPart && spareParts <= 0
             return (
               <button
@@ -33,7 +34,7 @@ export default function EmergencyModal({ emergency, onChoose, spareParts = 0 }) 
                   ? 'border-white/5 bg-slate-900/20 opacity-55 cursor-not-allowed'
                   : 'border-white/10 hover:border-cyan-400/40 hover:bg-cyan-500/5 bg-slate-900/40'}`}
               >
-                <div className="font-semibold text-white mb-1">{c.label}{needsPart ? ' · needs 1 spare part' : ''}</div>
+                <div className="font-semibold text-white mb-1">{c.label}{needsPart && !partMentioned ? ' · needs 1 spare part' : ''}</div>
                 <div className="text-sm text-slate-300">{c.consequence}</div>
                 {disabled && <div className="text-xs text-red-300 mt-1">No spare parts left — choose a different response.</div>}
               </button>

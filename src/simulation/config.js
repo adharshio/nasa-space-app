@@ -21,6 +21,44 @@ export const UNITS = {
 
 export const MISSION_DURATION_DAYS = 30
 
+// ---------------------------------------------------------------------------
+// Real-time simulation clock ("Clash of Clans" pacing)
+// Time runs on its own — the player never has to press "advance day".
+// A mission Sol is compressed into a short real-time window so a full
+// 30-Sol campaign lasts a normal play session.
+//   1 Sol  = 48 real seconds  →  1 real second = 30 mission minutes
+// Speed multipliers let the commander fast-forward base operations.
+// ---------------------------------------------------------------------------
+export const TIME = {
+  secondsPerSol: 24,   // real seconds for one mission Sol at 1× (1 real sec = 1 mission hour)
+  tickMs: 500,         // simulation heartbeat (2 updates / second)
+  speeds: [1, 2, 4],   // available time-compression levels
+  minutesPerSol: 24 * 60,
+}
+
+// Crew reports keep the commander engaged: a warning marker + astronaut
+// report appears every 10–15 real seconds while the mission is running.
+export const CREW_REPORT = {
+  minDelayMs: 10000,
+  maxDelayMs: 15000,
+}
+
+// Sol clock label (00:00 → 23:59) for a 0..1 fraction of the current Sol.
+export function solClockLabel(fraction = 0) {
+  const f = ((fraction % 1) + 1) % 1
+  const totalMinutes = Math.floor(f * TIME.minutesPerSol)
+  const hh = Math.floor(totalMinutes / 60)
+  const mm = totalMinutes % 60
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
+
+// How much simulated time one real second represents (for the HUD).
+export function timeCompressionLabel(speed = 1) {
+  const missionMinutes = (speed * TIME.minutesPerSol) / TIME.secondsPerSol
+  if (missionMinutes < 60) return `${Math.round(missionMinutes)} mission min / real sec`
+  return `${(missionMinutes / 60).toFixed(1)} mission hr / real sec`
+}
+
 export const DIFFICULTIES = {
   explorer: {
     label: 'Explorer',

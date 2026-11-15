@@ -95,26 +95,29 @@ export function getDailyRates(state) {
   }
 }
 
-export function applyDailyResources(state) {
+// Advance life support by a fraction of a Sol (0..1). The real-time clock
+// calls this every tick; a full Sol (dtSols = 1) matches the old daily turn.
+export function applyResources(state, dtSols = 1) {
   const rates = getDailyRates(state)
+  const dt = Math.max(0, dtSols)
   const r = structuredClone(state.resources)
   const diff = DIFFICULTIES[state.difficulty] ?? DIFFICULTIES.survival
   const power = rates.power
 
-  r.oxygen.current = clamp(r.oxygen.current + rates.oxygenDelta, 0, r.oxygen.max)
-  r.water.current = clamp(r.water.current + rates.waterDelta, 0, r.water.max)
-  r.food.current = clamp(r.food.current + rates.foodDelta, 0, r.food.max)
+  r.oxygen.current = clamp(r.oxygen.current + rates.oxygenDelta * dt, 0, r.oxygen.max)
+  r.water.current = clamp(r.water.current + rates.waterDelta * dt, 0, r.water.max)
+  r.food.current = clamp(r.food.current + rates.foodDelta * dt, 0, r.food.max)
 
   // Battery / electricity: surplus charges battery first, deficit drains it then the reserve
   let battery = r.battery.current
   let elec = r.electricity.current
   if (rates.electricityNet >= 0) {
-    const charge = rates.electricityNet * 0.12
+    const charge = rates.electricityNet * 0.12 * dt
     battery = clamp(battery + charge, 0, r.battery.max)
-    elec = clamp(elec + rates.electricityNet * 0.15, 0, r.electricity.max)
+    elec = clamp(elec + rates.electricityNet * 0.15 * dt, 0, r.electricity.max)
   } else {
     const deficit = Math.abs(rates.electricityNet)
-    const batteryDrain = deficit * 0.18
+    const batteryDrain = deficit * 0.18 * dt
     if (battery >= batteryDrain) {
       battery -= batteryDrain
     } else {
@@ -124,8 +127,8 @@ export function applyDailyResources(state) {
     }
     // Very low reserve strains life support further
     if (elec < 40) {
-      r.oxygen.current = clamp(r.oxygen.current - 1.2 * diff.consumptionMultiplier, 0, r.oxygen.max)
-      r.water.current = clamp(r.water.current - 0.8 * diff.consumptionMultiplier, 0, r.water.max)
+      r.oxygen.current = clamp(r.oxygen.current - 1.2 * diff.consumptionMultiplier * dt, 0, r.oxygen.max)
+      r.water.current = clamp(r.water.current - 0.8 * diff.consumptionMultiplier * dt, 0, r.water.max)
     }
   }
   r.battery.current = clamp(battery, 0, r.battery.max)
@@ -135,10 +138,14 @@ export function applyDailyResources(state) {
   // Turning the greenhouse off pauses growth (crops are not destroyed).
   let growth = Number.isFinite(state.greenhouseGrowth) ? state.greenhouseGrowth : 0
   if (state.equipment?.greenhouse && power.hasPower && r.water.current > 5) {
-    growth = Math.min(CREW.greenhouseGrowDays, growth + 1)
+    growth = Math.min(CREW.greenhouseGrowDays, growth + dt)
   }
 
   return { resources: r, rates, greenhouseGrowth: growth }
+}
+
+export function applyDailyResources(state) {
+  return applyResources(state, 1)
 }
 
 export function applyEffects(state, effects = {}) {

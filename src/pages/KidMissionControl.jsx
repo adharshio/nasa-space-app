@@ -1,6 +1,9 @@
+import { useState } from 'react'
 import { useMission } from '../hooks/useMission'
-import EmergencyModal from '../components/EmergencyModal'
-import { Wind, Apple, Zap, ArrowRight } from 'lucide-react'
+import MissionClock from '../components/MissionClock'
+import CrewAvatar from '../components/CrewAvatar'
+import CrewReportModal from '../components/CrewReportModal'
+import { Wind, Apple, Zap, AlertTriangle, ChevronRight } from 'lucide-react'
 
 function Gauge({ label, pct, note, icon: Icon }) {
   const p = Math.max(0, Math.min(100, pct))
@@ -25,10 +28,22 @@ function Gauge({ label, pct, note, icon: Icon }) {
 }
 
 export default function KidMissionControl() {
-  const { state, nextDay, chooseEmergency } = useMission()
+  const { state, chooseEmergency, resolveCrewReport, speed, setSpeed, solProgress } = useMission()
+  const [openIssueId, setOpenIssueId] = useState(null)
   if (!state) return null
 
   const { resources, atmosphere, day, astronautName, log, pendingEmergency, phase } = state
+  const crew = state.astronauts
+  const crewReport = state.crewReport
+  const emergency = phase === 'emergency' ? pendingEmergency : null
+  const issue = emergency
+    ? { ...emergency, kind: 'emergency' }
+    : crewReport
+      ? { ...crewReport, kind: 'crew' }
+      : null
+  const issueReporter = issue ? (crew.find((c) => c.id === issue.astronautId) ?? crew[0]) : null
+  const issueIsEmergency = issue?.kind === 'emergency'
+  const issueDanger = issueIsEmergency || issue?.severity === 'danger'
   const oxygenPct = (resources.oxygen.current / resources.oxygen.max) * 100
   const cabinPct = ((atmosphere?.oxygenConc ?? 21) - 17) / 6 * 100
   const airPct = Math.round((oxygenPct + Math.max(0, Math.min(100, cabinPct))) / 2)
@@ -53,14 +68,39 @@ export default function KidMissionControl() {
         <Gauge icon={Zap} label="Power" pct={powerPct} note="Do we have electricity and battery?" />
       </div>
 
+      {issue && (
+        <div className={`rounded-3xl border-2 p-5 ${issueDanger ? 'border-red-400/50 bg-red-500/10' : 'border-amber-400/50 bg-amber-500/10'}`}>
+          <div className="flex flex-wrap items-center gap-4">
+            <CrewAvatar astronaut={issueReporter} size={70} alert={issueDanger} />
+            <div className="min-w-0 flex-1">
+              <p className={`flex items-center gap-2 text-sm font-black uppercase tracking-widest ${issueDanger ? 'text-red-300' : 'text-amber-300'}`}>
+                <AlertTriangle size={18} /> {issueIsEmergency ? 'Emergency!' : 'A friend has news!'}
+              </p>
+              <p className="mt-1 text-2xl font-black text-white">{issueReporter?.name?.split(' ')[0]} says: “{issue.title}”</p>
+              <p className="text-lg text-slate-300">{issueIsEmergency ? 'Mission time is paused. Let’s fix it together!' : 'Time is still going — help when you are ready.'}</p>
+            </div>
+            <button
+              onClick={() => setOpenIssueId(issue?.id ?? null)}
+              className={`inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-xl font-black text-slate-950 shadow-lg transition ${issueDanger ? 'bg-red-400 hover:bg-red-300' : 'bg-amber-400 hover:bg-amber-300'}`}
+            >
+              What happened? <ChevronRight size={24} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-center">
-        <button
-          onClick={nextDay}
-          disabled={phase !== 'active'}
-          className="inline-flex items-center gap-4 px-10 py-5 rounded-3xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 text-3xl font-black tracking-wide shadow-xl shadow-sky-500/20"
-        >
-          Advance Day <ArrowRight size={30} />
-        </button>
+        <div className="w-full max-w-3xl">
+          <MissionClock
+            day={Math.min(day, state.missionLength)}
+            missionLength={state.missionLength}
+            solProgress={solProgress}
+            speed={speed}
+            setSpeed={setSpeed}
+            phase={phase}
+          />
+          <p className="mt-3 text-center text-lg text-slate-300">Time keeps going on its own — pause any time you need to think!</p>
+        </div>
       </div>
 
       <div className="glass rounded-3xl p-5">
@@ -72,7 +112,17 @@ export default function KidMissionControl() {
         </div>
       </div>
 
-      <EmergencyModal emergency={state.phase === 'emergency' ? pendingEmergency : null} onChoose={chooseEmergency} spareParts={resources.spareParts} />
+      <CrewReportModal
+        issue={openIssueId && openIssueId === issue?.id ? issue : null}
+        astronaut={issueReporter}
+        onChoose={(choiceId) => {
+          if (issueIsEmergency) chooseEmergency(choiceId)
+          else resolveCrewReport(choiceId)
+          setOpenIssueId(null)
+        }}
+        onClose={() => setOpenIssueId(null)}
+        spareParts={resources.spareParts}
+      />
     </div>
   )
 }

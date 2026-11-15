@@ -1,6 +1,7 @@
 import { moonMission } from '../data/moonMission'
 import { marsMission } from '../data/marsMission'
 import { defaultEquipmentState, DEFAULT_SPARE_PARTS } from '../data/equipment'
+import { crewReportTemplates } from '../data/crewReports'
 import {
   MISSION_DURATION_DAYS,
   DIFFICULTIES,
@@ -15,7 +16,7 @@ import {
   EXPLORATION,
   RADIATION_DOSE,
 } from './config'
-import { applyDailyResources, applyEffects, getDailyRates, powerAvailability } from './resourceManager'
+import { applyResources, applyEffects, getDailyRates, powerAvailability } from './resourceManager'
 import { evaluateMission } from './missionEvaluator'
 import { clamp } from '../utils/calculations'
 
@@ -56,7 +57,7 @@ export function createMissionState(missionId, astronautName = 'Commander', diffi
     waste: { current: 4, max: 30 },
   }
 
-  return {
+  return finishNewState({
     schemaVersion: 3,
     missionId,
     missionLength,
@@ -65,6 +66,7 @@ export function createMissionState(missionId, astronautName = 'Commander', diffi
     difficulty,
     seed,
     day: 1,
+    missionClock: 0,
     phase: 'active', // active | emergency | completed
     astronauts: CREW_ROLES.map(makeCrewMember),
     resources: startResources,
@@ -92,6 +94,8 @@ export function createMissionState(missionId, astronautName = 'Commander', diffi
     greenhouseGrowth: 0, // Sols of growth completed (0..3) before harvest
     optionalLoads: true, // science, comms & lighting — can be shed to protect power
     pendingEmergency: null,
+    crewReport: null,   // { id, type, title, description, choices, astronautId, station, severity }
+    reportSeq: 0,       // increments so reports stay reproducible-ish and unique
     roverMission: null, // { actionKey, dayStarted, daysRemaining, aborted }
     firedStorms: [],   // archived DONKI storm Sols already triggered this run
     earthRequest: null, // { delayMin, answerDay, topic } — Mars only (4–24 min one-way)
@@ -105,6 +109,7 @@ export function createMissionState(missionId, astronautName = 'Commander', diffi
     stats: {
       emergenciesEncountered: 0,
       emergenciesHandled: 0,
+      reportsHandled: 0,
       scientificPoints: 0,
       roverTrips: 0,
       evas: 0,
@@ -117,7 +122,28 @@ export function createMissionState(missionId, astronautName = 'Commander', diffi
     },
     rates: null,
     result: null,
+  })
+}
+
+// Sol-start snapshot: lets the real-time clock report "what changed this Sol".
+function snapshotSolStart(resources, atmosphere, environment) {
+  return {
+    oxygen: resources.oxygen.current,
+    water: resources.water.current,
+    food: resources.food.current,
+    electricity: resources.electricity.current,
+    battery: resources.battery.current,
+    co2Ppm: atmosphere?.co2Ppm ?? 0,
+    pressure: atmosphere?.pressure ?? 101.3,
+    temperature: environment?.temperature ?? 21,
+    radiation: environment?.radiation ?? 0,
+    waste: resources.waste?.current ?? 0,
   }
+}
+
+function finishNewState(state) {
+  state.solStart = snapshotSolStart(state.resources, state.atmosphere, state.environment)
+  return state
 }
 
 function snapshotHistory(day, resources, environment, atmosphere) {
@@ -212,6 +238,65 @@ export function sceneModeFor(type, choiceId) {
 }
 export function crewOverrideFor(type, choiceId) {
   return SCENE_RULES[type]?.[choiceId]?.crew ?? WALK
+}
+
+// --- Crew issues: which astronaut reports them, where the warning marker sits
+// on the base scene, and how urgent they are.
+const ISSUE_REPORTER = {
+  equipment_failure: 'maya',
+  power_failure: 'maya',
+  oxygen_leak: 'maya',
+  fire_smoke: 'maya',
+  co2_scrubber_failure: 'maya',
+  extreme_temperature: 'maya',
+  water_leak: 'alex',
+  water_contamination: 'alex',
+  medical_emergency: 'alex',
+  dust_storm: 'samira',
+  spacesuit_failure: 'samira',
+  radiation_storm: 'samira',
+  solar_storm: 'samira',
+}
+
+const ISSUE_STATION = {
+  dust_storm: 'solar',
+  power_failure: 'solar',
+  solar_storm: 'solar',
+  oxygen_leak: 'habitat',
+  medical_emergency: 'habitat',
+  co2_scrubber_failure: 'habitat',
+  extreme_temperature: 'habitat',
+  equipment_failure: 'lab',
+  water_leak: 'lab',
+  water_contamination: 'lab',
+  fire_smoke: 'lab',
+  radiation_storm: 'vault',
+  spacesuit_failure: 'rover',
+}
+
+const ISSUE_SEVERITY = {
+  oxygen_leak: 'danger',
+  fire_smoke: 'danger',
+  medical_emergency: 'danger',
+  spacesuit_failure: 'danger',
+  radiation_storm: 'danger',
+  solar_storm: 'danger',
+}
+
+export function issueMetaFor(type, fallbackReporter = 'maya') {
+  const reporterId = ISSUE_REPORTER[type] ?? fallbackReporter
+  return {
+    reporterId,
+    astronautId: reporterId,
+    station: ISSUE_STATION[type] ?? 'lab',
+    severity: ISSUE_SEVERITY[type] ?? 'warning',
+  }
+}
+
+function annotateIssue(template, extraReporter) {
+  const meta = issueMetaFor(template.type)
+  const reporterId = extraReporter ?? meta.reporterId
+  return { ...template, ...meta, reporterId, astronautId: reporterId }
 }
 
 function buildWarnings(state) {
@@ -383,6 +468,9 @@ export function sendOnEva(state, astronautId, actionKey = 'geologicalSample') {
       id: `spacesuit_failure-${next.day}-${Math.floor(rng() * 1000)}`,
       day: next.day,
       type: 'spacesuit_failure',
+      ...issueMetaFor('spacesuit_failure'),
+      reporterId: crew.id,
+      astronautId: crew.id,
       title: 'Spacesuit Failure',
       description: `${crew.name}'s suit reports a malfunction during the EVA. Oxygen status and mobility are compromised.`,
       science: 'Spacesuits are life-support systems in themselves. A suit failure threatens oxygen supply, thermal control and communication.',
@@ -408,7 +496,14 @@ function refreshCrewStatus(c) {
   else c.status = 'active'
 }
 
-function applyAtmosphereAndCrew(next) {
+// Exponential approach that stays correct for partial-Sol ticks.
+function approach(current, target, ratePerSol, dt) {
+  if (dt <= 0 || ratePerSol <= 0) return current
+  if (ratePerSol >= 1) return target
+  return current + (target - current) * (1 - Math.pow(1 - ratePerSol, dt))
+}
+
+function applyAtmosphereAndCrew(next, dt = 1) {
   const a = next.atmosphere
   const r = next.resources
   const e = next.equipment
@@ -421,30 +516,36 @@ function applyAtmosphereAndCrew(next) {
   const oxyPowered = e.oxygenRecycler && power.hasPower
   const o2Target = oxyPowered ? 21 : 15
   const o2Rate = (oxyPowered ? 1.3 * (power.reserveLow ? 0.7 : 1) : -2.2) * oxyEff
-  a.oxygenConc = clamp(a.oxygenConc + Math.sign(o2Target - a.oxygenConc) * Math.min(Math.abs(o2Target - a.oxygenConc), Math.abs(o2Rate)), 10, 24)
+  const o2Step = Math.min(Math.abs(o2Target - a.oxygenConc), Math.abs(o2Rate) * dt)
+  a.oxygenConc = clamp(a.oxygenConc + Math.sign(o2Target - a.oxygenConc) * o2Step, 10, 24)
 
   // --- CO2 concentration ---
   // CO2 accumulates from respiration; scrubber removes it only while powered.
   const co2Gen = 3.1 * next.astronauts.length // ppm per day-ish baseline drift
   const scrubEff = conditionEfficiency(next.equipmentCondition.co2Scrubber)
   const scrub = e.co2Scrubber && power.hasPower ? 1150 * scrubEff * (power.reserveLow ? 0.6 : 1) : 0
-  a.co2Ppm = clamp(a.co2Ppm + co2Gen - (scrub > 0 ? co2Gen * (1 + scrub / 500) : -900), 350, 5000)
+  const co2Delta = co2Gen - (scrub > 0 ? co2Gen * (1 + scrub / 500) : -900)
+  a.co2Ppm = clamp(a.co2Ppm + co2Delta * dt, 350, 5000)
 
   // --- Pressure ---
   const pressureLeak = next.modifiers?.pressureLeak ?? 0
-  a.pressure = clamp(a.pressure + (100.5 - a.pressure) * 0.06 - pressureLeak, 80, 108)
+  a.pressure = clamp(approach(a.pressure, 100.5, 0.06, dt) - pressureLeak * dt, 80, 108)
 
   // --- Humidity drift ---
   const humShift = (e.greenhouse ? 1.5 : 0) + (e.wasteProcessor ? 0 : 4) - (e.heating && power.hasPower ? 0.5 : 0)
-  a.humidity = clamp(a.humidity + humShift, 15, 80)
+  a.humidity = clamp(a.humidity + humShift * dt, 15, 80)
 
   // --- Waste accumulation ---
-  next.resources.waste.current = clamp(next.resources.waste.current + 0.9 * next.astronauts.length * diff.consumptionMultiplier - (e.wasteProcessor && power.hasPower ? 2.2 : 0), 0, next.resources.waste.max)
+  next.resources.waste.current = clamp(
+    next.resources.waste.current + (0.9 * next.astronauts.length * diff.consumptionMultiplier - (e.wasteProcessor && power.hasPower ? 2.2 : 0)) * dt,
+    0,
+    next.resources.waste.max,
+  )
 
   // --- Equipment degradation ---
   const wear = EQUIPMENT_CONDITION.dailyWear + (next.environment.radiation > 30 ? 0.4 : 0)
   for (const key of Object.keys(next.equipmentCondition)) {
-    next.equipmentCondition[key] = clamp(next.equipmentCondition[key] - wear * (key === 'rover' || key === 'spacesuit' ? 0.6 : 1), 5, 100)
+    next.equipmentCondition[key] = clamp(next.equipmentCondition[key] - wear * (key === 'rover' || key === 'spacesuit' ? 0.6 : 1) * dt, 5, 100)
   }
 
   // --- Crew physiology ---
@@ -452,12 +553,12 @@ function applyAtmosphereAndCrew(next) {
   for (const c of next.astronauts) {
     if (c.status === 'lost') continue
     // hydration & nutrition — restored while supplies are available (crew drink/eat from reserves)
-    if (r.water.current > 25) c.hydration = clamp(c.hydration + (95 - c.hydration) * 0.22, 0, 100)
-    else if (r.water.current > 8) c.hydration = clamp(c.hydration - 5 * diff.consumptionMultiplier, 0, 100)
-    else c.hydration = clamp(c.hydration - 10 * diff.consumptionMultiplier, 0, 100)
-    if (r.food.current > 25) c.nutrition = clamp(c.nutrition + (95 - c.nutrition) * 0.22, 0, 100)
-    else if (r.food.current > 8) c.nutrition = clamp(c.nutrition - 4.5 * diff.consumptionMultiplier, 0, 100)
-    else c.nutrition = clamp(c.nutrition - 9 * diff.consumptionMultiplier, 0, 100)
+    if (r.water.current > 25) c.hydration = approach(c.hydration, 95, 0.22, dt)
+    else if (r.water.current > 8) c.hydration = clamp(c.hydration - 5 * diff.consumptionMultiplier * dt, 0, 100)
+    else c.hydration = clamp(c.hydration - 10 * diff.consumptionMultiplier * dt, 0, 100)
+    if (r.food.current > 25) c.nutrition = approach(c.nutrition, 95, 0.22, dt)
+    else if (r.food.current > 8) c.nutrition = clamp(c.nutrition - 4.5 * diff.consumptionMultiplier * dt, 0, 100)
+    else c.nutrition = clamp(c.nutrition - 9 * diff.consumptionMultiplier * dt, 0, 100)
     let healthDelta = 1.2 // natural recovery when conditions are fine
     if (r.water.current <= 5) healthDelta -= 6
     if (r.food.current <= 5) healthDelta -= 5
@@ -476,13 +577,13 @@ function applyAtmosphereAndCrew(next) {
     if (t < 10 || t > 34) healthDelta -= 6
     // radiation
     if (next.environment.radiation > 30) healthDelta -= (next.environment.radiation - 30) * 0.09 * (e.radiationShelter ? 0.3 : 1)
-    c.radiationDose += next.environment.radiation * RADIATION_DOSE.perIndex * (e.radiationShelter ? 0.35 : 1)
+    c.radiationDose += next.environment.radiation * RADIATION_DOSE.perIndex * (e.radiationShelter ? 0.35 : 1) * dt
     // accumulated dose — shielding slows it, but nothing erases it
     if (c.radiationDose > RADIATION_DOSE.critical) healthDelta -= 7
     else if (c.radiationDose > RADIATION_DOSE.danger) healthDelta -= 4
     else if (c.radiationDose > RADIATION_DOSE.warn) healthDelta -= 2
     // hygiene / waste
-    if (highWaste) { healthDelta -= 3.5; c.stress = clamp(c.stress + 4, 0, 100) }
+    if (highWaste) { healthDelta -= 3.5; c.stress = clamp(c.stress + 4 * dt, 0, 100) }
     // hydration & nutrition effects
     if (c.hydration < 40) healthDelta -= 4
     if (c.hydration < 20) healthDelta -= 6
@@ -491,15 +592,15 @@ function applyAtmosphereAndCrew(next) {
     // fatigue/stress cross-effect
     if (c.fatigue > 70) healthDelta -= 3
     if (c.stress > 75) healthDelta -= 3
-    c.health = clamp(c.health + healthDelta, 0, 100)
+    c.health = clamp(c.health + healthDelta * dt, 0, 100)
     // fatigue & stress recovery/accumulation
-    c.fatigue = clamp(c.fatigue + 5.5 - (c.fatigue > 60 ? 2.5 : 4.5), 0, 100)
-    c.stress = clamp(c.stress + (next.phase === 'emergency' ? 5 : 0.8) - 1.8, 0, 100)
+    c.fatigue = clamp(c.fatigue + (5.5 - (c.fatigue > 60 ? 2.5 : 4.5)) * dt, 0, 100)
+    c.stress = clamp(c.stress + ((next.phase === 'emergency' ? 5 : 0.8) - 1.8) * dt, 0, 100)
     refreshCrewStatus(c)
   }
 }
 
-function applyCrewAssignments(next) {
+function applyCrewAssignments(next, dt = 1) {
   const crew = next.astronauts
   const power = powerAvailability(next)
   let repairBoost = 0
@@ -507,14 +608,14 @@ function applyCrewAssignments(next) {
   for (const c of crew) {
     if (c.status !== 'active') continue
     if (c.task === 'Rest') {
-      c.fatigue = clamp(c.fatigue - 7, 0, 100); c.stress = clamp(c.stress - 2.5, 0, 100)
+      c.fatigue = clamp(c.fatigue - 7 * dt, 0, 100); c.stress = clamp(c.stress - 2.5 * dt, 0, 100)
     } else if (c.task === 'Medical monitoring') {
-      medCalm += 1; c.stress = clamp(c.stress - 2.5, 0, 100)
-      c.health = clamp(c.health + 0.7, 0, 100)
+      medCalm += 1; c.stress = clamp(c.stress - 2.5 * dt, 0, 100)
+      c.health = clamp(c.health + 0.7 * dt, 0, 100)
     } else if (c.task === 'Scientific research') {
-      if (power.hasPower && next.optionalLoads !== false) next.stats.scientificPoints += 1
+      if (power.hasPower && next.optionalLoads !== false) next.stats.scientificPoints += 1 * dt
     } else if (c.task === 'Rover operation') {
-      if (power.hasPower) next.stats.scientificPoints += 1
+      if (power.hasPower) next.stats.scientificPoints += 1 * dt
     } else if (c.task === 'Solar array maintenance') {
       solarCare += 1
     } else if (c.task === 'Greenhouse monitoring') {
@@ -525,22 +626,22 @@ function applyCrewAssignments(next) {
       repairBoost += c.profession === 'Engineer' ? 1.6 : 1.0
     }
     // Non-rest tasks add a small fatigue load
-    if (c.task !== 'Rest') c.fatigue = clamp(c.fatigue + 1.4, 0, 100)
+    if (c.task !== 'Rest') c.fatigue = clamp(c.fatigue + 1.4 * dt, 0, 100)
   }
   // Engineering & systems upkeep (assignments genuinely influence the sim)
   if (tending > 0 && next.equipment.greenhouse) {
     const growth = Number.isFinite(next.greenhouseGrowth) ? next.greenhouseGrowth : 0
     if (growth < CREW.greenhouseGrowDays && power.hasPower && next.resources.water.current > 5) {
-      next.greenhouseGrowth = Math.min(CREW.greenhouseGrowDays, growth + 0.5 * tending)
+      next.greenhouseGrowth = Math.min(CREW.greenhouseGrowDays, growth + 0.5 * tending * dt)
     } else if (growth >= CREW.greenhouseGrowDays) {
-      next.resources.food.current = clamp(next.resources.food.current + 0.7 * tending, 0, next.resources.food.max)
+      next.resources.food.current = clamp(next.resources.food.current + 0.7 * tending * dt, 0, next.resources.food.max)
     }
   }
-  if (solarCare > 0) next.environment.solarEfficiency = clamp(next.environment.solarEfficiency + 0.8 * solarCare, 20, 100)
+  if (solarCare > 0) next.environment.solarEfficiency = clamp(next.environment.solarEfficiency + 0.8 * solarCare * dt, 20, 100)
   if (inspection > 0) {
     for (const key of Object.keys(next.equipmentCondition)) {
       if (key === 'rover' || key === 'spacesuit') continue
-      next.equipmentCondition[key] = clamp(next.equipmentCondition[key] + 0.6 * inspection, 5, 100)
+      next.equipmentCondition[key] = clamp(next.equipmentCondition[key] + 0.6 * inspection * dt, 5, 100)
     }
   }
   if (repairBoost > 0) {
@@ -550,17 +651,17 @@ function applyCrewAssignments(next) {
       if (key === 'rover' || key === 'spacesuit') continue
       if (next.equipmentCondition[key] < worstCond) { worstCond = next.equipmentCondition[key]; worstKey = key }
     }
-    if (worstKey) next.equipmentCondition[worstKey] = clamp(next.equipmentCondition[worstKey] + repairBoost, 5, 100)
+    if (worstKey) next.equipmentCondition[worstKey] = clamp(next.equipmentCondition[worstKey] + repairBoost * dt, 5, 100)
   }
-  if (medCalm > 0) for (const c of crew) c.stress = clamp(c.stress - 0.8 * medCalm, 0, 100)
+  if (medCalm > 0) for (const c of crew) c.stress = clamp(c.stress - 0.8 * medCalm * dt, 0, 100)
   return next
 }
 
-function progressRover(next) {
+function progressRover(next, dt = 1) {
   if (!next.roverMission) return
-  next.roverMission.daysRemaining -= 1
-  next.equipmentCondition.rover = clamp(next.equipmentCondition.rover - 1.5, 5, 100)
-  for (const c of next.astronauts) if (c.task === 'Rover operation') c.fatigue = clamp(c.fatigue + 3, 0, 100)
+  next.roverMission.daysRemaining -= dt
+  next.equipmentCondition.rover = clamp(next.equipmentCondition.rover - 1.5 * dt, 5, 100)
+  for (const c of next.astronauts) if (c.task === 'Rover operation') c.fatigue = clamp(c.fatigue + 3 * dt, 0, 100)
   if (next.roverMission.daysRemaining <= 0) resolveRoverMission(next)
 }
 
@@ -582,6 +683,7 @@ function applyScheduledStorm(state, next) {
       id: `solar_storm-${next.day}-archived`,
       day: next.day,
       ...tmpl,
+      ...issueMetaFor('solar_storm'),
       title: `Solar Particle Event — ${storm.label}`,
       description: `Archived event replay: ${storm.label}. Radiation is spiking. Shelter the crew now — shielding saves health.`,
       science: 'This replays an archived solar storm from the NASA DONKI/CCMC catalog. Real events dose anything unshielded — vaults and thick regolith drop the dose dramatically.',
@@ -631,80 +733,85 @@ export function askEarth(state) {
   return next
 }
 
-export function advanceDay(state) {
-  if (state.phase !== 'active') return state
-  let next = structuredClone(state)
+// ---------------------------------------------------------------------------
+// Continuous-time core
+// The clock advances in fractions of a Sol. Physics, life support, crew and
+// equipment all scale with the elapsed fraction, so the base runs on its own.
+// A Sol boundary triggers the old "day" bookkeeping: environment forecast,
+// archived storms, Earth reply, history, mission checks and emergencies.
+// ---------------------------------------------------------------------------
 
-  // A new Sol clears last Sol's emergency staging; assignments drive the scene again.
-  next.scene = { mode: 'nominal', crewOverride: null, lastDecision: next.scene?.lastDecision ?? null }
+// Apply dt of a Sol of physics. dt = 1 reproduces one legacy daily turn.
+export function simulateStep(state, dtSols = 1) {
+  const dt = Math.max(0, Math.min(1, dtSols))
+  if (dt <= 0) return state
+  const next = structuredClone(state)
+  // These only change at Sol boundaries (or on logged events); reusing the
+  // references keeps the React tree stable during the 2 Hz ticker.
+  next.history = state.history
+  next.log = state.log
 
-  // Environment for the Sol being simulated (modifier timers decay once per Sol)
-  const envUpdate = updateEnvironmentInPlace(next)
-  next.environment = envUpdate.environment
-  next.modifiers = envUpdate.modifiers
-
-  // Habitat temperature drifts based on heating vs outside cold. Heating needs power.
+  // Habitat temperature drifts toward the heating target (exponential approach).
   const power = powerAvailability(next)
   const outside = next.environment.outsideTemp ?? next.environment.temperature ?? -20
   const heatingTarget = next.equipment.heating && power.hasPower ? (power.reserveLow ? 17 : 21) : clamp(outside, -60, 21)
-  next.environment.temperature = Math.round(next.environment.temperature + (heatingTarget - next.environment.temperature) * 0.35)
+  next.environment.temperature = next.environment.temperature + (heatingTarget - next.environment.temperature) * (1 - Math.pow(0.65, dt))
   next.environment.sunlight = next.environment.sunlight ?? 1
 
-  // Apply daily resource ticks (life support / production) — centralized in resourceManager
-  const applied = applyDailyResources(next)
+  // Life support / production resources (centralized in resourceManager)
+  const applied = applyResources(next, dt)
   next.resources = applied.resources
   next.rates = applied.rates
   next.greenhouseGrowth = applied.greenhouseGrowth
-
-  // Archived storm Sol is scripted for today — spike radiation BEFORE health impact is applied
-  applyScheduledStorm(state, next)
 
   // Radiation exposure impact on habitat systems
   let radImpact = 0
   if (next.environment.radiation > 35) radImpact = next.equipment.radiationShelter ? 1 : 4
   else if (next.environment.radiation > 25) radImpact = next.equipment.radiationShelter ? 0.5 : 2
   if (radImpact > 0) {
-    next.resources.oxygen.current = clamp(next.resources.oxygen.current - radImpact, 0, next.resources.oxygen.max)
-    pushLog(next, `Radiation exposure impacted habitat systems (-${radImpact.toFixed(1)} oxygen).`, 'warning')
+    next.resources.oxygen.current = clamp(next.resources.oxygen.current - radImpact * dt, 0, next.resources.oxygen.max)
   }
 
   // Atmosphere & crew physiology (O2/CO2/pressure/humidity/waste/health)
-  applyAtmosphereAndCrew(next)
+  applyAtmosphereAndCrew(next, dt)
 
   // Crew assignments & rover progress (part of the same cycle)
-  applyCrewAssignments(next)
-  progressRover(next)
+  applyCrewAssignments(next, dt)
+  progressRover(next, dt)
 
-  // Mission-cycle summary for the UI (what changed and why)
-  const sr = state.resources
-  const sa = state.atmosphere
-  const se = state.environment
-  next.lastCycleSummary = {
-    day: next.day,
-    oxygenDelta: next.resources.oxygen.current - sr.oxygen.current,
-    waterDelta: next.resources.water.current - sr.water.current,
-    foodDelta: next.resources.food.current - sr.food.current,
-    electricityDelta: next.resources.electricity.current - sr.electricity.current,
-    batteryDelta: next.resources.battery.current - sr.battery.current,
-    co2Delta: next.atmosphere.co2Ppm - sa.co2Ppm,
-    pressureDelta: next.atmosphere.pressure - sa.pressure,
-    temperatureDelta: next.environment.temperature - se.temperature,
-    radiationDelta: next.environment.radiation - se.radiation,
-    wasteAdded: next.resources.waste.current - sr.waste.current,
+  return next
+}
+
+function newSolSummary(next, completedDay) {
+  const start = next.solStart
+  if (!start) {
+    return {
+      day: completedDay,
+      oxygenDelta: 0, waterDelta: 0, foodDelta: 0, electricityDelta: 0, batteryDelta: 0,
+      co2Delta: 0, pressureDelta: 0, temperatureDelta: 0, radiationDelta: 0, wasteAdded: 0,
+      warnings: buildWarnings(next),
+    }
+  }
+  return {
+    day: completedDay,
+    oxygenDelta: next.resources.oxygen.current - start.oxygen,
+    waterDelta: next.resources.water.current - start.water,
+    foodDelta: next.resources.food.current - start.food,
+    electricityDelta: next.resources.electricity.current - start.electricity,
+    batteryDelta: next.resources.battery.current - start.battery,
+    co2Delta: next.atmosphere.co2Ppm - start.co2Ppm,
+    pressureDelta: next.atmosphere.pressure - start.pressure,
+    temperatureDelta: next.environment.temperature - start.temperature,
+    radiationDelta: next.environment.radiation - start.radiation,
+    wasteAdded: next.resources.waste.current - start.waste,
     warnings: buildWarnings(next),
   }
+}
 
-  next.day += 1
-  // Earth's delayed reply is checked at the start of the new Sol.
-  processEarth(next)
-  // Forecast the new Sol so the dashboard shows the conditions that will be simulated next.
-  next.environment = previewEnvironmentInPlace(next)
-  pushLog(next, `Day ${next.day - 1} complete. Net power ${applied.rates.electricityNet >= 0 ? '+' : ''}${applied.rates.electricityNet.toFixed(1)} units.`, 'info')
-  next.history = [...next.history, snapshotHistory(next.day, next.resources, next.environment, next.atmosphere)].slice(-40)
-
-  // Mission failure checks
-  const membersLost = next.astronauts.filter((c) => c.status === 'lost').length
-  const allLost = membersLost === next.astronauts.length
+// Terminal-condition checks — shared by the ticker and Sol rollover.
+function checkMissionFailure(next) {
+  if (next.phase === 'completed') return next
+  const allLost = next.astronauts.every((c) => c.status === 'lost')
   const powerOut = next.resources.electricity.current <= 0 && next.resources.battery.current <= 0
   const oxygenOut = next.resources.oxygen.current <= 0
   const waterOut = next.resources.water.current <= 0
@@ -720,10 +827,49 @@ export function advanceDay(state) {
     next.phase = 'completed'
     next.result = evaluateMission(next, { forcedFailure: `Mission failed: ${reason} exhausted. Crew survival compromised.` })
     pushLog(next, next.result.reason, 'danger')
-    return next
+  }
+  return next
+}
+
+// Move from the Sol that just ended into the next one (mutates `state`).
+function rolloverSol(state) {
+  const next = state
+  const completedDay = next.day
+  const completedRates = next.rates ?? getDailyRates(next)
+
+  // What changed during the Sol the player just lived through.
+  next.lastCycleSummary = newSolSummary(next, completedDay)
+
+  // Next Sol: reset staging scene, advance the counter and the sub-Sol clock.
+  next.day = completedDay + 1
+  next.missionClock = Math.max(0, (next.missionClock ?? 0) - 1)
+  next.scene = { mode: 'nominal', crewOverride: null, lastDecision: next.scene?.lastDecision ?? null }
+
+  // Environment for the new Sol (modifier timers decay once per Sol).
+  const envUpdate = updateEnvironmentInPlace(next)
+  next.environment = envUpdate.environment
+  next.modifiers = envUpdate.modifiers
+
+  if (next.environment.radiation > 25) {
+    pushLog(next, `Radiation exposure strained habitat systems during Sol ${completedDay}.`, 'warning')
   }
 
-  // Mission success at duration
+  // Archived DONKI storm Sol is scripted — spike radiation before the crew enters it.
+  applyScheduledStorm(next, next)
+
+  // Earth's delayed reply is checked at the start of the new Sol.
+  processEarth(next)
+
+  pushLog(next, `Sol ${completedDay} complete. Net power ${completedRates.electricityNet >= 0 ? '+' : ''}${completedRates.electricityNet.toFixed(1)} units.`, 'info')
+  next.history = [...next.history, snapshotHistory(next.day, next.resources, next.environment, next.atmosphere)].slice(-40)
+
+  // New Sol baseline for the cycle summary.
+  next.solStart = snapshotSolStart(next.resources, next.atmosphere, next.environment)
+
+  // Terminal states
+  checkMissionFailure(next)
+  if (next.phase === 'completed') return next
+
   if (next.day > next.missionLength) {
     next.phase = 'completed'
     next.result = evaluateMission({ ...next, day: next.missionLength })
@@ -731,7 +877,7 @@ export function advanceDay(state) {
     return next
   }
 
-  // Generate emergency for new day (seeded, reproducible)
+  // Generate an emergency for the new Sol (seeded, reproducible)
   const emergency = generateEmergencySeeded(next)
   if (emergency) {
     next.pendingEmergency = emergency
@@ -741,6 +887,33 @@ export function advanceDay(state) {
   }
 
   return next
+}
+
+// Real-time heartbeat: advance the simulation by dtSols (fraction of a Sol).
+export function tickMission(state, dtSols) {
+  if (!state || state.phase !== 'active') return state
+  const dt = Math.max(0, Math.min(1, dtSols))
+  if (dt <= 0) return state
+
+  let next = simulateStep(state, dt)
+  next.missionClock = (state.missionClock ?? 0) + dt
+
+  let guard = 0
+  while (next.missionClock >= 1 && next.phase === 'active' && guard < 4) {
+    next = rolloverSol(next)
+    guard += 1
+  }
+
+  if (next.phase === 'active') next = checkMissionFailure(next)
+  return next
+}
+
+// Kept for compatibility / instant skip: simulate a full Sol and roll over.
+export function advanceDay(state) {
+  if (state.phase !== 'active') return state
+  const simulated = simulateStep(state, 1)
+  simulated.missionClock = 1
+  return rolloverSol(simulated)
 }
 
 function buildEnvironment(state, day) {
@@ -787,16 +960,6 @@ function scheduledStormRadiation(day) {
   return clamp(60 + (day % 7) * 2, 0, 100)
 }
 
-// Forecast (no modifier decay) for the Sol that will be simulated next.
-// Includes a scripted storm spike so the dashboard warns before the crew enters it.
-function previewEnvironmentInPlace(state) {
-  const env = buildEnvironment(state, state.day)
-  const storms = state.mission.profile?.archivedStorms ?? []
-  const storm = storms.find((s) => s.day === state.day && !(state.firedStorms ?? []).includes(s.day))
-  if (storm) env.radiation = scheduledStormRadiation(state.day)
-  return env
-}
-
 function generateEmergencySeeded(state) {
   if (state.pendingEmergency) return null
   if (state.phase !== 'active') return null
@@ -821,7 +984,121 @@ function generateEmergencySeeded(state) {
     const j = Math.floor(rng() * (i + 1))
     ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
   }
-  return { id: `${template.type}-${day}-${Math.floor(rng() * 1000)}`, day, ...template, choices: shuffled }
+  return { id: `${template.type}-${day}-${Math.floor(rng() * 1000)}`, day, ...annotateIssue(template), choices: shuffled }
+}
+
+// --- Frequent crew reports (every 10–15 real seconds) --------------------
+// These are non-blocking warning markers: the clock keeps running, an
+// astronaut pops up to report to the Mission Director, and the player clicks
+// the marker to open the decision panel.
+const TAG_CONDITION = {
+  power: (s) => s.resources.electricity.current < 180 || s.environment.solarEfficiency < 60,
+  dust: (s) => s.missionId === 'mars' && s.environment.solarEfficiency < 65,
+  water: (s) => s.resources.water.current < s.resources.water.max * 0.6,
+  air: (s) => s.atmosphere.co2Ppm > 1100 || s.resources.oxygen.current < s.resources.oxygen.max * 0.5,
+  crew: (s) => s.astronauts.some((c) => c.fatigue > 60 || c.stress > 65),
+  waste: (s) => s.resources.waste.current > 18,
+  suit: (s) => (s.equipmentCondition?.spacesuit ?? 90) < 75,
+  radiation: (s) => s.environment.radiation > 28,
+  thermal: (s) => s.environment.temperature < 18,
+  food: (s) => s.resources.food.current < s.resources.food.max * 0.5,
+}
+
+function reportPool(state) {
+  const pool = []
+  for (const template of crewReportTemplates) {
+    const boosted = template.tags?.some((tag) => TAG_CONDITION[tag]?.(state))
+    const weight = boosted ? 3 : 1
+    for (let i = 0; i < weight; i += 1) pool.push(template)
+  }
+  return pool
+}
+
+export function spawnCrewReport(state) {
+  if (!state || state.phase !== 'active' || state.crewReport) return state
+  const next = structuredClone(state)
+  const seq = (next.reportSeq ?? 0) + 1
+  next.reportSeq = seq
+  const rng = mulberry32(next.seed + next.day * 7919 + seq * 104729)
+  const pool = reportPool(next)
+  const template = pool[Math.floor(rng() * pool.length)]
+  if (!template) return state
+
+  const shuffled = [...template.choices]
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  }
+  const preferredReporter = next.astronauts.find((c) => c.id === template.reporterId && c.status === 'active')
+  const reporter = preferredReporter ?? next.astronauts.find((c) => c.status === 'active') ?? next.astronauts[0]
+
+  next.crewReport = {
+    id: `crew-${next.day}-${seq}`,
+    day: next.day,
+    type: template.id,
+    title: template.title,
+    description: template.description,
+    science: template.science,
+    choices: shuffled,
+    reporterId: reporter?.id ?? template.reporterId,
+    astronautId: reporter?.id ?? template.reporterId,
+    station: template.station,
+    severity: template.severity ?? 'warning',
+    reportedAt: next.missionClock ?? 0,
+    origin: 'crew',
+  }
+  pushLog(next, `${reporter?.name ?? 'Crew'} reports to the Mission Director: ${template.title}. A warning marker is active on the base.`, 'warning')
+  return next
+}
+
+export function resolveCrewReport(state, choiceId) {
+  if (!state?.crewReport) return state
+  const next = structuredClone(state)
+  const report = next.crewReport
+  const choice = report.choices.find((c) => c.id === choiceId)
+  if (!choice) return state
+
+  // Choices that consume a spare part cannot be taken without one.
+  if ((choice.effects.spareParts ?? 0) < 0 && next.resources.spareParts <= 0) {
+    pushLog(next, `Cannot choose "${choice.label}": no spare parts left. Pick another response.`, 'warning')
+    return next
+  }
+
+  const applied = applyEffects(next, choice.effects)
+  next.resources = applied.resources
+  next.environment = applied.environment
+  next.atmosphere = applied.atmosphere ?? next.atmosphere
+  for (const c of next.astronauts) refreshCrewStatus(c)
+
+  if (choice.effects.solarEfficiencyDelta) {
+    next.environment.solarEfficiency = clamp(next.environment.solarEfficiency + choice.effects.solarEfficiencyDelta, 20, 100)
+    next.modifiers = { solarPenalty: 0, solarEfficiencyDelta: 0, radiationOffset: 0, temperatureOffset: 0, equipmentEfficiency: 1, ...(next.modifiers || {}) }
+    next.modifiers.solarEfficiencyDelta = (next.modifiers.solarEfficiencyDelta || 0) + choice.effects.solarEfficiencyDelta
+  }
+  if (choice.effects.duration) next.modifiers = { ...(next.modifiers || {}), duration: Math.max(next.modifiers?.duration || 0, choice.effects.duration) }
+  if (choice.effects.equipmentBoost === 1) next.modifiers = { ...(next.modifiers || {}), equipmentEfficiency: 1.05 }
+  if (choice.effects.equipmentBoost === -1) next.modifiers = { ...(next.modifiers || {}), equipmentEfficiency: 0.9 }
+
+  if (report.type === 'equipment_failure' || report.type === 'co2_scrubber_failure' || report.type === 'power_failure') {
+    const target = report.type === 'equipment_failure' ? 'waterRecycler' : report.type === 'co2_scrubber_failure' ? 'co2Scrubber' : 'solarPower'
+    next.equipmentCondition[target] = clamp(next.equipmentCondition[target] - EQUIPMENT_CONDITION.emergencyWear * 0.6, 5, 100)
+  }
+
+  next.scene = {
+    mode: 'nominal',
+    crewOverride: null,
+    lastDecision: { type: report.type, choiceId: choice.id, title: report.title, label: choice.label },
+  }
+
+  const harmful = ['delay', 'patch_later', 'ignore', 'continue', 'defer', 'minimum', 'med_ignore', 'fire_ignore', 'push']
+  if (!harmful.includes(choice.id)) {
+    next.stats.reportsHandled = (next.stats.reportsHandled ?? 0) + 1
+    next.stats.scientificPoints += 2
+  }
+
+  pushLog(next, `${report.title} handled: ${choice.label}. ${choice.consequence}`, harmful.includes(choice.id) ? 'warning' : 'success')
+  next.crewReport = null
+  return checkMissionFailure(next)
 }
 
 // Emergency data lives with the engine so generation stays seeded/authoritative

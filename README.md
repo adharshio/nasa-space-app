@@ -41,8 +41,9 @@ Survive **30 Sols** (Moon/Mars) — or **10–12 Sols** in Kid Mode — with oxy
 2. Adjust equipment (ON/OFF) and repair systems with **spare parts**.
 3. Send the **rover** on surveys (science, lunar water-ice, Mars CO₂→O₂ ISRU study).
 4. Manage atmosphere: **oxygen concentration**, **CO₂ ppm**, **cabin pressure**, **humidity**, **waste**.
-5. Advance the day — the engine calculates everything in order: environment → power → life support → atmosphere → crew → events → failure/success.
-6. Resolve emergencies — each option states **what it protects / saves / costs**; answer order is shuffled, and “do nothing” choices were replaced by real trade-offs (e.g. “save power but lose air”).
+5. **Let time run.** Mission time advances on its own — there is no “advance day” button. One Sol takes **24 real seconds** at 1× (1 real second = 1 mission hour), so a 30-Sol campaign is about a **12-minute** session. Use **Pause** and **1× / 2× / 4×** to control the pace.
+6. **Watch for crew reports.** Every **10–15 real seconds** an astronaut raises a maintenance issue. Their avatar pops up below the base view, and a clickable **warning marker** appears on the surface scene. Click the marker (or the popup / sidebar card) to open a full-screen **transmission** with the full-body astronaut, a message box, an urgency meter and the response choices. The astronaut’s face reacts to urgency — concerned for warnings, alarmed for emergencies — and crew faces in the base scene show stress too. These are quick, small-stakes trade-offs; full emergencies pause time and demand a decision.
+7. Resolve emergencies — each option states **what it protects / saves / costs**; answer order is shuffled, and “do nothing” choices were replaced by real trade-offs (e.g. “save power but lose air”). Mission time pauses while an emergency is waiting for your decision.
 
 ### What the sim models
 - **Power:** solar generation depends on sunlight, panel condition, dust and mission (Mars runs **below** demand — choose what to switch off). Battery stores surplus and takes the strain. Critical life support keeps priority, important systems are throttled under low reserve, and **optional science/comms/lighting loads (10 power/day)** can be shed — research pauses while they are off.
